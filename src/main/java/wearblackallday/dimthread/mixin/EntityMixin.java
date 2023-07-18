@@ -2,8 +2,6 @@ package wearblackallday.dimthread.mixin;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityDimensions;
-import net.minecraft.entity.EntityPose;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
@@ -16,7 +14,6 @@ import net.minecraft.world.Heightmap;
 import net.minecraft.world.TeleportTarget;
 import net.minecraft.world.World;
 import net.minecraft.world.border.WorldBorder;
-import net.minecraft.world.dimension.AreaHelper;
 import net.minecraft.world.dimension.DimensionType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,6 +31,8 @@ import wearblackallday.dimthread.util.UncompletedTeleportTarget;
 
 import java.util.Optional;
 
+import static net.minecraft.world.dimension.NetherPortal.getNetherTeleportTarget;
+
 @Mixin(Entity.class)
 public abstract class EntityMixin {
 
@@ -50,7 +49,7 @@ public abstract class EntityMixin {
 
 	@Shadow public abstract @Nullable Entity moveToWorld(ServerWorld destination);
 
-	@Shadow private int netherPortalCooldown;
+	@Shadow private int portalCooldown;
 
 	@Shadow protected BlockPos lastNetherPortalPosition;
 
@@ -58,7 +57,7 @@ public abstract class EntityMixin {
 
 	@Shadow @Nullable public abstract MinecraftServer getServer();
 
-	@Shadow public World world;
+	@Shadow private World world;
 
 	@Shadow public abstract double getX();
 
@@ -69,10 +68,6 @@ public abstract class EntityMixin {
 	@Shadow protected abstract Optional<BlockLocating.Rectangle> getPortalRect(ServerWorld destWorld, BlockPos destPos, boolean destIsNether, WorldBorder worldBorder);
 
 	@Shadow protected abstract Vec3d positionInPortal(Direction.Axis portalAxis, BlockLocating.Rectangle portalRect);
-
-	@Shadow public abstract EntityDimensions getDimensions(EntityPose pose);
-
-	@Shadow public abstract EntityPose getPose();
 
 	@Shadow public abstract Vec3d getVelocity();
 
@@ -92,7 +87,7 @@ public abstract class EntityMixin {
 	 * Schedules moving entities between dimensions to the server thread. Once all
 	 * the world finish ticking, {@code moveToWorld()} is processed in a safe manner
 	 * avoiding concurrent modification exceptions.
-	 *
+	 * <p>
 	 * For example, the entity list is not thread-safe and modifying it from
 	 * multiple threads will cause a crash. Additionally, loading chunks from
 	 * another thread will cause a deadlock in the server chunk manager.
@@ -110,7 +105,7 @@ public abstract class EntityMixin {
 						Entity entity = this.moveToWorld(destination);
 						if(entity == null) {
 							this.unsetRemoved();
-							nbtCachedForMoveToWorld.putInt("PortalCooldown", this.netherPortalCooldown);
+							nbtCachedForMoveToWorld.putInt("PortalCooldown", this.portalCooldown);
 							this.readNbt(nbtCachedForMoveToWorld);
 							this.uncompletedTeleportTargetForMoveToWorld = null;
 							this.nbtCachedForMoveToWorld = null;
@@ -133,7 +128,7 @@ public abstract class EntityMixin {
 			NbtCompound nbtCompound = ((EntityMixin) (Object) original).nbtCachedForMoveToWorld;
 			nbtCompound.remove("Dimension");
 			instance.readNbt(nbtCompound);
-			((EntityMixin) (Object) instance).netherPortalCooldown = ((EntityMixin) (Object) original).netherPortalCooldown;
+			((EntityMixin) (Object) instance).portalCooldown = ((EntityMixin) (Object) original).portalCooldown;
 			((EntityMixin) (Object) instance).lastNetherPortalPosition = ((EntityMixin) (Object) original).lastNetherPortalPosition;
 		} else {
 			instance.copyFrom(original);
@@ -189,7 +184,6 @@ public abstract class EntityMixin {
 				BlockState portalState = world.getBlockState(lastNetherPortalPosition);
 				Direction.Axis axis;
 				Vec3d vec3d;
-				EntityDimensions dimensions = getDimensions(getPose());
 				if (portalState.contains(Properties.HORIZONTAL_AXIS)) {
 					axis = portalState.get(Properties.HORIZONTAL_AXIS);
 					BlockLocating.Rectangle rectangle = BlockLocating.getLargestRectangle(this.lastNetherPortalPosition, axis, 21, Direction.Axis.Y, 21, (blockPos) -> this.world.getBlockState(blockPos) == portalState);
@@ -198,7 +192,7 @@ public abstract class EntityMixin {
 					axis = Direction.Axis.X;
 					vec3d = new Vec3d(0.5, 0.0, 0.0);
 				}
-				return dest1 -> getPortalRect(dest1, target, isNetherPortal, border).map((rect) -> AreaHelper.getNetherTeleportTarget(dest1, rect, axis, vec3d, dimensions, velocity, yaw, pitch)).orElse(null);
+				return dest1 -> getPortalRect(dest1, target, isNetherPortal, border).map((rect) -> getNetherTeleportTarget(dest1, rect, axis, vec3d, (Entity) (Object) this, velocity, yaw, pitch)).orElse(null);
 			}
 		} else {
 			return dest1 -> {
